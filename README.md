@@ -28,6 +28,23 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
+## مصدر البيانات عند النشر
+
+البيانات لا تُرفع إلى هذا المستودع العام. عند النشر يقرأها التطبيق تلقائيًا من مستودع خاص
+عبر GitHub API، باستخدام مفتاح للقراءة فقط محفوظ في Streamlit Secrets:
+
+```toml
+[data_repo]
+token = "github_pat_..."          # مفتاح fine-grained بصلاحية Contents: Read-only على المستودع الخاص فقط
+repo = "OWNER/PRIVATE_REPO"
+ref = "main"
+folder = "dashboard_data"
+```
+
+تُحدَّث البيانات تلقائيًا كل ساعة. ترتيب المصادر: مجلد `data/` المحلي، ثم المستودع الخاص، ثم شاشة الرفع اليدوي.
+
+## الملفات محليًا
+
 ضع ملفات البيانات في `data/` بالأسماء: `contract_integrated.xlsx`، `purchase_orders.xlsx`، `direct_cancelled.xlsx`، `consumables.xlsx`.
 إذا لم تكن الملفات موجودة، تعرض اللوحة شاشة لرفعها. تبقى الملفات المرفوعة في الجلسة فقط ولا تُحفظ.
 

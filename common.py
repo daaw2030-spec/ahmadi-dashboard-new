@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import io
+import urllib.error
+import urllib.parse
+import urllib.request
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -18,15 +21,51 @@ FONT = "Tajawal, 'Segoe UI', Tahoma, sans-serif"
 
 
 # ---------------------------------------------------------------- البيانات المخزنة مؤقتًا
-# مصدر كل ملف: مجلد data إن وُجد، وإلا الملف المرفوع في الجلسة (للنشر دون رفع البيانات إلى GitHub)
+# مصدر كل ملف بالترتيب: مجلد data المحلي ← مستودع البيانات الخاص على GitHub (عبر st.secrets)
+# ← ملف مرفوع في الجلسة. بذلك يبقى مستودع الكود العام خاليًا من البيانات.
+def _data_repo() -> dict | None:
+    """إعدادات [data_repo] في Streamlit Secrets: token, repo, ref, folder."""
+    try:
+        cfg = st.secrets.get("data_repo")
+    except Exception:  # لا يوجد ملف secrets
+        return None
+    return dict(cfg) if cfg and cfg.get("token") and cfg.get("repo") else None
+
+
+@st.cache_data(ttl=3600, show_spinner="جارٍ جلب البيانات من المستودع الخاص…")
+def _remote_bytes(filename: str, repo: str, ref: str, folder: str, token: str) -> bytes | None:
+    url = (f"https://api.github.com/repos/{repo}/contents/"
+           f"{urllib.parse.quote(f'{folder}/{filename}'.strip('/'))}?ref={urllib.parse.quote(ref)}")
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}",
+                                               "Accept": "application/vnd.github.raw",
+                                               "X-GitHub-Api-Version": "2022-11-28"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return resp.read()
+    except urllib.error.URLError:
+        return None
+
+
+def _remote(key: str) -> bytes | None:
+    cfg = _data_repo()
+    if not cfg:
+        return None
+    path, _ = dl.FILES[key]
+    return _remote_bytes(path.name, cfg["repo"], cfg.get("ref", "main"), cfg.get("folder", "dashboard_data"),
+                         cfg["token"])
+
+
 def missing_files() -> list[str]:
     uploads = st.session_state.get("uploads", {})
-    return [k for k, (path, _) in dl.FILES.items() if not path.exists() and k not in uploads]
+    return [k for k, (path, _) in dl.FILES.items()
+            if not path.exists() and k not in uploads and _remote(k) is None]
 
 
 def _src(key: str) -> bytes | None:
     path, _ = dl.FILES[key]
-    return None if path.exists() else st.session_state["uploads"][key]
+    if path.exists():
+        return None
+    return _remote(key) or st.session_state["uploads"][key]
 
 
 def _io(data: bytes | None):
