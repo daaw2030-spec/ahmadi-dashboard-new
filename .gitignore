@@ -1,0 +1,16 @@
+# بيانات العمل الأصلية والصورة المرجعية — لا تُرفع
+/*.xlsx
+/*.jpg
+/*.png
+# نسخ البيانات المستخدمة في التطبيق — لا تُرفع إلى GitHub افتراضيًا (يمكن رفعها من داخل التطبيق)
+data/*.xlsx
+~$*.xlsx
+# الأرقام المالية المرجعية للاختبار — محلية فقط
+tests/expected_official.json
+
+.streamlit/secrets.toml
+.claude/
+__pycache__/
+*.pyc
+.venv/
+venv/
