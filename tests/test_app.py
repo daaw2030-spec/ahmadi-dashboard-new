@@ -31,6 +31,24 @@ if all(p.exists() for p, _ in dl.FILES.values()):
         for mode in (None, "كل الأشهر"):
             at = run(page, month_mode=mode)
             print("OK", page, mode or "default", "| title:", at.title[0].value if at.title else "-")
+    # تغيير الفلاتر يجب أن يغيّر المؤشرات
+    def kpis(at):
+        return [m.value for m in at.markdown if 'class="kpi"' in m.value]
+    base = run()
+    k0 = kpis(base)
+    base.multiselect(key="depts").set_value(["التكييف"]).run()
+    k1 = kpis(base)
+    assert k1 != k0, "فلتر القسم لم يغيّر المؤشرات"
+    base.multiselect(key="years").set_value([2026]).run()
+    k2 = kpis(base)
+    assert k2 != k1 and all("2025" not in k for k in k2), "فلتر السنة لم يُخفِ 2025"
+    base.multiselect(key="fin_status").set_value(["ملغي"]).run()
+    assert not base.exception
+    base.switch_page("views/purchase_orders.py").run()
+    before = kpis(base)
+    base.multiselect(key="po_status").set_value(["تم التسليم"]).run()
+    assert kpis(base) != before, "فلتر الحالة لم يغيّر مؤشرات أوامر الشراء"
+    print("FILTERS OK: department, year, status change KPIs")
 else:
     at = run()
     print("upload screen shown:", len(at.get("file_uploader")) if hasattr(at, "get") else "?")

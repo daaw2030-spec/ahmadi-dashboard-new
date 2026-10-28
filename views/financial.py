@@ -29,7 +29,9 @@ st.subheader("مقارنة 2025 و2026 لنفس الأشهر")
 st.caption("الأشهر المختارة: " + "، ".join(dl.MONTHS_AR[m] for m in months)
            + ("" if set(months) <= set(c.comparable_months()) else
               " — تنبيه: بعض الأشهر المختارة ليس لها بيانات بعد في 2026، فالمقارنة ليست متكافئة."))
+statuses = c.status_filter(["صادر", "ملغي"], key="fin_status")
 sel = c.apply_filters(tx, f)
+sel = sel[sel["الحالة"].isin(statuses)]
 y25, y26 = (sel[sel["السنة"] == y] for y in (2025, 2026))
 issued25, issued26 = (d[d["الحالة"] == "صادر"] for d in (y25, y26))
 
@@ -44,19 +46,19 @@ with d:
 
 l, r = st.columns(2)
 with l:
-    st.markdown("**المبلغ المنصرف شهريًا**")
-    c.show(c.monthly_compare(sel, "المبلغ", months, "ريال"))
+    c.chart("المبلغ المنصرف شهريًا", "يقارن قيمة أوامر الشراء الصادرة في كل شهر بين العامين لاكتشاف أشهر الذروة.",
+            c.monthly_compare(sel, "المبلغ", months, "المبلغ (ريال)"))
 with r:
-    st.markdown("**المنصرف التراكمي**")
-    c.show(c.cumulative_compare(sel, "المبلغ", months, "ريال"))
+    c.chart("المنصرف التراكمي", "يوضح وتيرة استهلاك العقد: أي العامين كان أسرع صرفًا حتى نفس الشهر.",
+            c.cumulative_compare(sel, "المبلغ", months, "المبلغ التراكمي (ريال)"))
 
 l, r = st.columns(2)
 with l:
-    st.markdown("**المنصرف حسب القسم**")
-    c.show(c.category_compare(sel, "القسم", "المبلغ", "ريال"))
+    c.chart("المنصرف حسب القسم", "يبين الأقسام الأعلى صرفًا وكيف تغيّر نصيب كل قسم بين العامين.",
+            c.category_compare(sel, "القسم", "المبلغ", "المبلغ (ريال)"))
 with r:
-    st.markdown("**عدد أوامر الشراء حسب القسم**")
-    c.show(c.category_compare(sel[sel["الحالة"] == "صادر"], "القسم", None, "عدد الأوامر", fmt=",.0f"))
+    c.chart("عدد أوامر الشراء حسب القسم", "يقارن حجم النشاط (عدد الأوامر) بغض النظر عن قيمتها.",
+            c.category_compare(sel, "القسم", None, "عدد أوامر الشراء", fmt=",.0f"))
 
 # ------------------------------------------------ التحقق والملاحظات
 with st.expander("التحقق من الأرقام وجودة البيانات"):
@@ -69,6 +71,15 @@ with st.expander("التحقق من الأرقام وجودة البيانات")
         f"{(tx['مصدر التاريخ'] == 'هجري محوّل').sum()}؛ بلا تاريخ صالح: {(tx['مصدر التاريخ'] == 'غير صالح').sum()} "
         "(تبقى ضمن الإجمالي الرسمي ولا تظهر في التوزيع الشهري)."
     )
+    po = c.purchase_orders()
+    official_ids = tx.loc[tx["الحالة"] == "صادر", ["رقم طلب الشراء", "المبلغ"]]
+    absent = official_ids[~official_ids["رقم طلب الشراء"].isin(po["رقم طلب الشراء"])]
+    st.markdown(
+        f"- مجموع «تكلفة الطلب» في ملف أوامر الشراء = **{c.money(po['تكلفة الطلب'].sum())}**، "
+        f"والفرق عن الرقم الرسمي = **{c.money(bal['disbursed'] - po['تكلفة الطلب'].sum())}**. "
+        + ("سبب الفرق: أوامر موجودة في ورقة الرصيد وغير موجودة في ملف أوامر الشراء: "
+           + "، ".join(f"طلب {r} بمبلغ {c.money(v)}" for r, v in absent.itertuples(index=False))
+           + ". لم يُعدّل أي رقم؛ المعتمد هو ورقة الرصيد." if len(absent) else ""))
     st.markdown("**ملاحظات مدخلة يدويًا أسفل الورقة المرجعية (تُعرض كما هي):**")
     for row, cells in bal["sheet_notes"].items():
         st.text(f"سطر {row}: " + "  |  ".join(str(x) for x in cells))

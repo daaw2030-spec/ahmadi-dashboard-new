@@ -12,7 +12,9 @@ st.title("أوامر الشراء ودورة المعاملة")
 basis = st.radio("أساس التاريخ للسنة والشهر", list(dl.DATE_BASES), horizontal=True, key="po_basis",
                  help="إذا كان تاريخ الأساس مفقودًا أو غير صالح يُستخدم أقرب تاريخ صالح في المعاملة بدلًا من استبعادها.")
 po = dl.with_reference_date(po_all, basis)
+statuses = c.status_filter(["تم التسليم", "صدر أمر الشراء", "قيد الإجراء", "ملغي"], key="po_status")
 sel = c.apply_filters(po, f)
+sel = sel[sel["الحالة"].isin(statuses)]
 months = sorted(f["months"])
 y25, y26 = (sel[sel["السنة"] == y] for y in dl.YEARS)
 
@@ -36,38 +38,39 @@ with e:
 
 l, r = st.columns(2)
 with l:
-    st.markdown("**عدد الطلبات شهريًا**")
-    c.show(c.monthly_compare(sel, None, months, "عدد الطلبات", fmt=",.0f"))
+    c.chart("عدد الطلبات شهريًا", "يقارن حجم الطلبات الواردة في كل شهر بين العامين.",
+            c.monthly_compare(sel, None, months, "عدد الطلبات", fmt=",.0f"))
 with r:
-    st.markdown("**متوسط مدة كل مرحلة (يوم)**")
     stages = dl.STAGE_DURATIONS
     fig = go.Figure()
-    for y in dl.YEARS:
+    for y in c.active_years():
         part = sel[sel["السنة"] == y]
         fig.add_bar(name=str(y), y=stages, x=part[stages].mean().values, orientation="h",
                     marker=dict(color=c.YEAR_COLORS[y], cornerradius=4),
                     customdata=part[stages].count().values,
                     hovertemplate=f"%{{y}} {y}<br>%{{x:.1f}} يوم (من %{{customdata}} معاملة)<extra></extra>")
-    fig = c._layout(fig, height=480, x_title="متوسط الأيام")
+    fig = c._layout(fig, height=520, x_title="متوسط عدد الأيام")
     fig.update_yaxes(autorange="reversed", showgrid=False)
     fig.update_xaxes(showgrid=True, gridcolor=c.GRID)
-    c.show(fig)
+    c.chart("متوسط مدة كل مرحلة (يوم)", "يحدد المراحل التي تستهلك أطول وقت؛ المدد السالبة أو غير الصالحة مستبعدة.",
+            fig)
 
 l, r = st.columns(2)
 with l:
-    st.markdown("**متوسط الأيام من الطلب حتى صدور الأمر حسب القسم**")
-    c.show(c.category_compare(sel, "القسم", "مدة الطلب حتى صدور الأمر", "يوم", agg="mean", fmt=".1f"))
+    c.chart("متوسط الأيام من الطلب حتى صدور الأمر حسب القسم",
+            "يقارن سرعة إنجاز طلبات كل قسم بين العامين.",
+            c.category_compare(sel, "القسم", "مدة الطلب حتى صدور الأمر", "متوسط عدد الأيام", agg="mean", fmt=".1f"))
 with r:
-    st.markdown("**حالة الطلبات**")
-    status = sel.groupby(["الحالة", "السنة"]).size().unstack(fill_value=0).reindex(columns=list(dl.YEARS), fill_value=0)
+    years = c.active_years()
+    status = sel.groupby(["الحالة", "السنة"]).size().unstack(fill_value=0).reindex(columns=years, fill_value=0)
     fig = go.Figure()
-    for y in dl.YEARS:
+    for y in years:
         fig.add_bar(name=str(y), x=status.index, y=status[y], marker=dict(color=c.YEAR_COLORS[y], cornerradius=4),
                     hovertemplate=f"%{{x}} {y}<br>%{{y}} طلب<extra></extra>")
-    c.show(c._layout(fig, y_title="عدد الطلبات"))
+    c.chart("حالة الطلبات", "يوضح كم طلبًا وصل إلى المستودع وكم ما زال قيد الإجراء أو أُلغي.",
+            c._layout(fig, y_title="عدد الطلبات", x_title="الحالة"))
 
 with st.expander("جودة البيانات: المدد المستبعدة من المؤشرات الزمنية"):
-    raw_dates = {name: po_all[name].notna().sum() for name in dl.STAGE_DATES}
     q = pd.DataFrame({
         "المرحلة": dl.STAGE_DURATIONS,
         "مدد صالحة": [int(sel[s].notna().sum()) for s in dl.STAGE_DURATIONS],

@@ -56,3 +56,21 @@ print("CONSUMABLES rows:", len(k), "issued qty:", k["الكمية المنصرف
 mismatch = k[(k["الكمية بالعقد"] - k["الكمية المنصرفة"] - k["المتبقي"]).abs() > 0.01]
 print("remaining mismatch rows:", len(mismatch))
 print("ALL CHECKS PASSED")
+
+# ---------------------------------------------------------------- قواعد البيانات
+import pandas as pd  # noqa: E402
+
+raw_po = pd.read_excel(dl.PO_FILE).rename(columns=lambda c: str(c).strip())
+assert len(po) == raw_po.dropna(how="all").dropna(subset=["رقم طلب الشراء", "القسم", "وصف الطلب"], how="all").shape[0], \
+    "يجب ألا تُحذف أي معاملة"
+dur_cols = dl.STAGE_DURATIONS + ["مدة الطلب حتى صدور الأمر", "مدة الأمر حتى التسليم"]
+assert int((po[dur_cols] < 0).sum().sum()) == 0, "لا مدد سالبة"
+for col in dl.STAGE_DATES:
+    s = po[col].dropna()
+    assert s.empty or (s.min() >= dl.VALID_MIN and s.max() <= dl.VALID_MAX), col
+# صف فيه تاريخ غير صالح يبقى ببقية بياناته
+bad_rows = po[po["إعداد الطلب"].isna()]
+assert len(bad_rows) and bad_rows["القسم"].notna().all() and bad_rows["الحالة"].notna().all()
+for basis in dl.DATE_BASES:
+    assert set(dl.with_reference_date(po, basis)["السنة"].dropna().astype(int)) <= {2025, 2026}
+print("DATA RULES PASSED: rows kept, no negative durations, invalid dates -> missing")

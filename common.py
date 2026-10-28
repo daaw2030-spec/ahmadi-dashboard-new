@@ -23,27 +23,46 @@ FONT = "Tajawal, 'Segoe UI', Tahoma, sans-serif"
 # ---------------------------------------------------------------- البيانات المخزنة مؤقتًا
 # مصدر كل ملف بالترتيب: مجلد data المحلي ← مستودع البيانات الخاص على GitHub (عبر st.secrets)
 # ← ملف مرفوع في الجلسة. بذلك يبقى مستودع الكود العام خاليًا من البيانات.
+DEFAULT_DATA_REPO = {"repo": "daaw2030-spec/ahmadi-dashboard", "ref": "main", "folder": "dashboard_data"}
+
+
+class RemoteDataError(Exception):
+    """فشل جلب ملف من المستودع الخاص؛ لا يُخزَّن مؤقتًا حتى يُعاد المحاولة في الزيارة التالية."""
+
+
 def _data_repo() -> dict | None:
-    """إعدادات [data_repo] في Streamlit Secrets: token, repo, ref, folder."""
+    """إعدادات Streamlit Secrets. المقبول: قسم [data_repo] فيه token (والباقي اختياري)،
+    أو مفتاح token / GITHUB_TOKEN في أعلى الملف."""
     try:
-        cfg = st.secrets.get("data_repo")
-    except Exception:  # لا يوجد ملف secrets
+        section = st.secrets.get("data_repo")
+        token = (section or {}).get("token") or st.secrets.get("token") or st.secrets.get("GITHUB_TOKEN")
+    except Exception:  # لا يوجد ملف secrets إطلاقًا
         return None
-    return dict(cfg) if cfg and cfg.get("token") and cfg.get("repo") else None
+    if not token:
+        return None
+    cfg = dict(DEFAULT_DATA_REPO)
+    cfg.update({k: str(v).strip() for k, v in dict(section or {}).items() if v})
+    cfg["token"] = str(token).strip()
+    return cfg
+
+
+def _github_get(url: str, token: str, raw: bool) -> bytes:
+    headers = {"Authorization": f"Bearer {token}", "X-GitHub-Api-Version": "2022-11-28",
+               "Accept": "application/vnd.github.raw" if raw else "application/vnd.github+json"}
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=60) as resp:
+            return resp.read()
+    except urllib.error.HTTPError as e:
+        raise RemoteDataError(e.code) from None
+    except urllib.error.URLError as e:
+        raise RemoteDataError(f"network: {e.reason}") from None
 
 
 @st.cache_data(ttl=3600, show_spinner="جارٍ جلب البيانات من المستودع الخاص…")
-def _remote_bytes(filename: str, repo: str, ref: str, folder: str, token: str) -> bytes | None:
-    url = (f"https://api.github.com/repos/{repo}/contents/"
-           f"{urllib.parse.quote(f'{folder}/{filename}'.strip('/'))}?ref={urllib.parse.quote(ref)}")
-    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}",
-                                               "Accept": "application/vnd.github.raw",
-                                               "X-GitHub-Api-Version": "2022-11-28"})
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            return resp.read()
-    except urllib.error.URLError:
-        return None
+def _remote_bytes(filename: str, repo: str, ref: str, folder: str, token: str) -> bytes:
+    path = urllib.parse.quote(f"{folder.strip('/')}/{filename}".strip("/"))
+    return _github_get(f"https://api.github.com/repos/{repo}/contents/{path}?ref={urllib.parse.quote(ref)}",
+                       token, raw=True)
 
 
 def _remote(key: str) -> bytes | None:
@@ -51,8 +70,38 @@ def _remote(key: str) -> bytes | None:
     if not cfg:
         return None
     path, _ = dl.FILES[key]
-    return _remote_bytes(path.name, cfg["repo"], cfg.get("ref", "main"), cfg.get("folder", "dashboard_data"),
-                         cfg["token"])
+    try:
+        return _remote_bytes(path.name, cfg["repo"], cfg["ref"], cfg["folder"], cfg["token"])
+    except RemoteDataError:
+        return None
+
+
+def remote_diagnosis() -> str:
+    """سبب عدم قراءة البيانات من المستودع الخاص، دون كشف المفتاح."""
+    cfg = _data_repo()
+    if not cfg:
+        return ("لم يجد التطبيق مفتاح الوصول في Streamlit Secrets. المطلوب قسم [data_repo] "
+                "وفيه token (تأكد من حفظ Secrets في إعدادات هذا التطبيق نفسه).")
+    where = f"{cfg['repo']} / {cfg['folder']} (فرع {cfg['ref']})"
+    try:
+        _github_get(f"https://api.github.com/repos/{cfg['repo']}", cfg["token"], raw=False)
+    except RemoteDataError as e:
+        code = e.args[0]
+        if code == 401:
+            return "GitHub رفض المفتاح (401): المفتاح غير صحيح أو منتهي الصلاحية."
+        if code in (403, 404):
+            return (f"المفتاح صالح لكنه لا يملك صلاحية قراءة المستودع {cfg['repo']} ({code}). "
+                    "يلزم أن يشمل المفتاح هذا المستودع وصلاحية Contents: Read-only.")
+        return f"تعذّر الاتصال بـ GitHub: {code}"
+    missing = []
+    for key, (path, _) in dl.FILES.items():
+        try:
+            _remote_bytes(path.name, cfg["repo"], cfg["ref"], cfg["folder"], cfg["token"])
+        except RemoteDataError as e:
+            missing.append(f"{path.name} ({e.args[0]})")
+    if missing:
+        return f"الوصول إلى المستودع يعمل، لكن هذه الملفات غير موجودة في {where}: " + "، ".join(missing)
+    return f"تم الوصول إلى جميع الملفات في {where}."
 
 
 def missing_files() -> list[str]:
@@ -119,8 +168,8 @@ def consumables():
 
 def upload_screen(missing: list[str]):
     st.title("لوحة عقد الأحمدي 2025–2026")
-    st.info("ملفات البيانات غير موجودة على الخادم (لم تُرفع إلى GitHub حفاظًا على سريتها). "
-            "ارفع الملفات التالية لعرض اللوحة؛ تبقى في جلستك فقط ولا تُحفظ.")
+    st.warning("تعذّر تحميل البيانات تلقائيًا من المستودع الخاص.\n\n**السبب:** " + remote_diagnosis())
+    st.info("حل مؤقت: يمكن رفع الملفات التالية لعرض اللوحة في هذه الجلسة فقط (لا تُحفظ).")
     uploads = st.session_state.setdefault("uploads", {})
     for key in missing:
         _, label = dl.FILES[key]
@@ -191,16 +240,25 @@ def kpi_official(label: str, value: str, sub: str = ""):
 
 
 def kpi_compare(label: str, v2025: float, v2026: float, fmt=money, show_change: bool = True):
+    sel = active_years()
     years = "".join(
         f'<div><div class="yl"><i style="background:{YEAR_COLORS[y]}"></i>{y}</div>'
-        f'<div class="yv">{fmt(v)}</div></div>' for y, v in ((2025, v2025), (2026, v2026)))
-    delta = f'<div class="delta">{change_text(v2025, v2026)}</div>' if show_change else ""
+        f'<div class="yv">{fmt(v)}</div></div>' for y, v in ((2025, v2025), (2026, v2026)) if y in sel)
+    delta = (f'<div class="delta">{change_text(v2025, v2026)}</div>'
+             if show_change and len(sel) == 2 else "")
     st.markdown(f'<div class="kpi"><div class="label">{label}</div><div class="years">{years}</div>{delta}</div>',
                 unsafe_allow_html=True)
 
 
 def note(text: str):
     st.markdown(f'<div class="note">{text}</div>', unsafe_allow_html=True)
+
+
+def chart(title: str, purpose: str, fig: go.Figure):
+    """عنوان الرسم + سطر يشرح هدفه + الرسم."""
+    st.markdown(f"**{title}**")
+    st.caption(purpose)
+    show(fig)
 
 
 # ---------------------------------------------------------------- الفلاتر العامة
@@ -228,15 +286,27 @@ def sidebar_filters():
         else:
             months = st.multiselect("الأشهر", list(range(1, 13)), default=same, key="months_manual",
                                     format_func=lambda m: dl.MONTHS_AR[m])
+        years = st.multiselect("السنوات", list(dl.YEARS), default=list(dl.YEARS), key="years",
+                               help="المقارنة مقصورة على 2025 و2026 فقط.")
         depts = st.multiselect("القسم / الجهة الطالبة", ALL_DEPTS, default=[], key="depts",
                                placeholder="كل الأقسام")
         st.divider()
-        st.caption("العامان المقارنان: 2025 و2026 فقط.")
-    return {"months": months or list(range(1, 13)), "depts": depts}
+    return {"months": months or list(range(1, 13)), "depts": depts, "years": years or list(dl.YEARS)}
+
+
+def active_years() -> list[int]:
+    return list(st.session_state.get("filters", {}).get("years", dl.YEARS))
+
+
+def status_filter(options: list[str], key: str) -> list[str]:
+    """فلتر الحالة الخاص بالصفحة (في الشريط الجانبي)."""
+    with st.sidebar:
+        chosen = st.multiselect("الحالة", options, default=[], key=key, placeholder="كل الحالات")
+    return chosen or options
 
 
 def apply_filters(df: pd.DataFrame, f: dict, dept_col: str = "القسم") -> pd.DataFrame:
-    out = df[df["السنة"].isin(dl.YEARS) & df["الشهر"].isin(f["months"])]
+    out = df[df["السنة"].isin(f["years"]) & df["الشهر"].isin(f["months"])]
     if f["depts"]:
         out = out[out[dept_col].isin(f["depts"])]
     return out
@@ -252,7 +322,8 @@ def _layout(fig: go.Figure, height: int = 380, y_title: str = "", x_title: str =
         hoverlabel=dict(font_family=FONT, bgcolor="white"),
     )
     fig.update_yaxes(gridcolor=GRID, zeroline=False, title=y_title, tickformat=",")
-    fig.update_xaxes(showgrid=False, title=x_title, linecolor="#C9D7EA")
+    fig.update_xaxes(showgrid=False, title=x_title, linecolor="#C9D7EA", automargin=True)
+    fig.update_yaxes(automargin=True)
     return fig
 
 
@@ -260,7 +331,7 @@ def monthly_compare(df: pd.DataFrame, value: str | None, months: list[int], y_ti
                     agg: str = "sum", fmt: str = ",.2f") -> go.Figure:
     """أعمدة متجاورة: نفس الشهر في 2025 مقابل 2026."""
     fig = go.Figure()
-    for y in dl.YEARS:
+    for y in active_years():
         part = df[df["السنة"] == y]
         g = part.groupby("الشهر")[value].agg(agg) if value else part.groupby("الشهر").size()
         g = g.reindex(months, fill_value=0)
@@ -274,7 +345,7 @@ def cumulative_compare(df: pd.DataFrame, value: str, months: list[int], y_title:
     """منحنى تراكمي؛ خط 2026 يتوقف عند آخر شهر له بيانات حتى لا يظهر ثباتًا وهميًا."""
     last_2026 = max(comparable_months(), default=12)
     fig = go.Figure()
-    for y in dl.YEARS:
+    for y in active_years():
         ms = [m for m in months if y != 2026 or m <= last_2026]
         g = df[df["السنة"] == y].groupby("الشهر")[value].sum().reindex(ms, fill_value=0).cumsum()
         fig.add_scatter(name=str(y), x=[dl.MONTHS_AR[m] for m in ms], y=g.values, mode="lines+markers",
@@ -291,10 +362,10 @@ def category_compare(df: pd.DataFrame, cat: str, value: str | None, x_title: str
         g = df.groupby([cat, "السنة"])[value].agg(agg).unstack(fill_value=0)
     else:
         g = df.groupby([cat, "السنة"]).size().unstack(fill_value=0)
-    g = g.reindex(columns=list(dl.YEARS), fill_value=0)
+    g = g.reindex(columns=active_years(), fill_value=0)
     g = g.loc[g.sum(axis=1).sort_values().index]
     fig = go.Figure()
-    for y in dl.YEARS:
+    for y in active_years():
         fig.add_bar(name=str(y), y=g.index, x=g[y], orientation="h",
                     marker=dict(color=YEAR_COLORS[y], cornerradius=4),
                     hovertemplate=f"%{{y}} {y}<br>%{{x:{fmt}}}<extra></extra>")
@@ -304,12 +375,26 @@ def category_compare(df: pd.DataFrame, cat: str, value: str | None, x_title: str
     return fig
 
 
+def wrap_label(text: str, width: int = 30) -> str:
+    """تقسيم التسمية الطويلة على أكثر من سطر بدل قصّها."""
+    lines, cur = [], ""
+    for word in str(text).split():
+        if cur and len(cur) + 1 + len(word) > width:
+            lines.append(cur)
+            cur = word
+        else:
+            cur = f"{cur} {word}".strip()
+    lines.append(cur)
+    return "<br>".join(lines)
+
+
 def single_bar(labels, values, x_title: str, fmt: str = ",.0f", height: int | None = None) -> go.Figure:
     labels = list(labels)
-    short = [t if len(t) <= 34 else t[:32] + "…" for t in labels]
+    short = [wrap_label(t) for t in labels]
     fig = go.Figure(go.Bar(y=short, x=list(values), orientation="h", marker=dict(color="#2F6DB5", cornerradius=4),
                            customdata=labels, hovertemplate=f"%{{customdata}}<br>%{{x:{fmt}}}<extra></extra>"))
-    fig = _layout(fig, height=height or max(300, 60 + 30 * len(labels)), x_title=x_title)
+    max_lines = max((s.count("<br>") + 1 for s in short), default=1)
+    fig = _layout(fig, height=height or max(320, 90 + len(short) * (18 * max_lines + 14)), x_title=x_title)
     fig.update_xaxes(gridcolor=GRID, showgrid=True)
     fig.update_yaxes(showgrid=False, title="")
     fig.update_layout(showlegend=False)
