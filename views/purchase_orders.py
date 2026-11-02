@@ -84,12 +84,14 @@ with l:
             c.category_compare(sel, "القسم", "مدة الطلب حتى صدور الأمر", "متوسط عدد الأيام", agg="mean", fmt=".1f"))
 with r:
     years = c.active_years()
-    status = sel.groupby(["الحالة", "السنة"]).size().unstack(fill_value=0).reindex(columns=years, fill_value=0)
+    # الإلغاء يُعرض من ملف الطلبات الملغاة (صفحة الطلبات المباشرة والملغاة) وليس من حالة هذا الملف
+    status = (sel[sel["الحالة"] != "ملغي"].groupby(["الحالة", "السنة"]).size().unstack(fill_value=0)
+              .reindex(columns=years, fill_value=0))
     fig = go.Figure()
     for y in years:
         fig.add_bar(name=str(y), x=status.index, y=status[y], marker=dict(color=c.YEAR_COLORS[y], cornerradius=4),
                     hovertemplate=f"%{{x}} {y}<br>%{{y}} طلب<extra></extra>")
-    c.chart("حالة الطلبات", "يوضح كم طلبًا وصل إلى المستودع وكم ما زال قيد الإجراء أو أُلغي.",
+    c.chart("حالة الطلبات", "يوضح كم طلبًا وصل إلى المستودع وكم ما زال مفتوحًا. الإلغاءات في صفحة الطلبات المباشرة والملغاة.",
             c._layout(fig, y_title="عدد الطلبات", x_title="الحالة"))
 
 with st.expander("جودة البيانات: المدد المستبعدة من المؤشرات الزمنية"):
