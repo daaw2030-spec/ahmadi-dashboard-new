@@ -378,7 +378,8 @@ def category_compare(df: pd.DataFrame, cat: str, value: str | None, x_title: str
 def delivery_bands(df: pd.DataFrame, col: str, limit: int) -> go.Figure:
     """نسبة الطلبات في كل فئة زمنية لكل عام، وأول فئة هي الالتزام بالحد المعتمد."""
     edges = [-1, limit, 14, 30, 60, float("inf")]
-    labels = [f"خلال {limit} أيام", f"{limit + 1}–14 يومًا", "15–30 يومًا", "31–60 يومًا", "أكثر من 60 يومًا"]
+    labels = [f"خلال {limit} أيام", f"من {limit + 1} إلى 14 يومًا", "من 15 إلى 30 يومًا", "من 31 إلى 60 يومًا",
+              "أكثر من 60 يومًا"]
     fig = go.Figure()
     for y in active_years():
         d = df.loc[df["السنة"] == y, col].dropna()
@@ -392,7 +393,7 @@ def delivery_bands(df: pd.DataFrame, col: str, limit: int) -> go.Figure:
 def consumption_bands(items: pd.DataFrame) -> go.Figure:
     """عدد الأصناف حسب نسبة استهلاك كميتها التعاقدية."""
     pct = items["نسبة الصرف %"]
-    labels = ["لم يُصرف منه", "أقل من 50%", "50% – 79%", "80% – 99%", "نفدت كميته (100%)"]
+    labels = ["لم يُستهلك منه", "أقل من نصف الكمية", "من 50 إلى 79 بالمئة", "من 80 إلى 99 بالمئة", "نفدت كميته"]
     groups = [pct.fillna(0) == 0, (pct > 0) & (pct < 50), (pct >= 50) & (pct < 80),
               (pct >= 80) & (pct < 100), pct >= 100]
     counts = [int(g.sum()) for g in groups]
