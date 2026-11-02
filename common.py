@@ -375,6 +375,35 @@ def category_compare(df: pd.DataFrame, cat: str, value: str | None, x_title: str
     return fig
 
 
+def delivery_bands(df: pd.DataFrame, col: str, limit: int) -> go.Figure:
+    """نسبة الطلبات في كل فئة زمنية لكل عام، وأول فئة هي الالتزام بالحد المعتمد."""
+    edges = [-1, limit, 14, 30, 60, float("inf")]
+    labels = [f"خلال {limit} أيام", f"{limit + 1}–14 يومًا", "15–30 يومًا", "31–60 يومًا", "أكثر من 60 يومًا"]
+    fig = go.Figure()
+    for y in active_years():
+        d = df.loc[df["السنة"] == y, col].dropna()
+        share = pd.cut(d, edges, labels=labels).value_counts(normalize=True).reindex(labels, fill_value=0) * 100
+        fig.add_bar(name=str(y), x=labels, y=share.values, marker=dict(color=YEAR_COLORS[y], cornerradius=4),
+                    text=[f"{v:.0f}%" for v in share.values], textposition="outside",
+                    hovertemplate=f"%{{x}} {y}<br>%{{y:.1f}}% من {len(d)} طلبًا مسلّمًا<extra></extra>")
+    return _layout(fig, y_title="نسبة الطلبات المسلّمة %", x_title="مدة التسليم")
+
+
+def consumption_bands(items: pd.DataFrame) -> go.Figure:
+    """عدد الأصناف حسب نسبة استهلاك كميتها التعاقدية."""
+    pct = items["نسبة الصرف %"]
+    labels = ["لم يُصرف منه", "أقل من 50%", "50% – 79%", "80% – 99%", "نفدت كميته (100%)"]
+    groups = [pct.fillna(0) == 0, (pct > 0) & (pct < 50), (pct >= 50) & (pct < 80),
+              (pct >= 80) & (pct < 100), pct >= 100]
+    counts = [int(g.sum()) for g in groups]
+    colors = ["#B8C4CE", "#9CC3E6", "#5B9BD5", "#2F6DB5", "#0B3C6E"]
+    fig = go.Figure(go.Bar(x=labels, y=counts, marker=dict(color=colors, cornerradius=4), text=counts,
+                           textposition="outside", hovertemplate="%{x}<br>%{y} صنف<extra></extra>"))
+    fig = _layout(fig, y_title="عدد الأصناف", x_title="نسبة الاستهلاك من كمية العقد")
+    fig.update_layout(showlegend=False)
+    return fig
+
+
 def wrap_label(text: str, width: int = 30) -> str:
     """تقسيم التسمية الطويلة على أكثر من سطر بدل قصّها."""
     lines, cur = [], ""

@@ -36,6 +36,28 @@ with e:
     rate = lambda s: (s["الحالة"] == "تم التسليم").mean() * 100 if len(s) else 0  # noqa: E731
     c.kpi_compare("نسبة الطلبات المسلّمة", rate(y25), rate(y26), fmt=lambda v: f"{v:.1f}%")
 
+st.subheader("الالتزام بمدد التسليم المعتمدة")
+c.note(f"الحد الأقصى للدورة كاملة من البلاغ حتى الاستلام في المستودع {dl.CYCLE_MAX} يومًا، ومن استلام المقاول "
+       f"لأمر الشراء حتى التسليم للمستودع من 3 إلى {dl.DELIVERY_MAX} أيام. الملف لا يحتوي تاريخ البلاغ ولا تاريخ "
+       "استلام المقاول للأمر، لذلك تُقاس الدورة من إعداد الطلب، والتسليم من صدور أمر الشراء. "
+       "النسب من الطلبات المسلّمة التي لها مدة صالحة.")
+LIMITS = [("مدة الطلب حتى التسليم", dl.CYCLE_MAX, "الدورة كاملة"),
+          ("مدة الأمر حتى التسليم", dl.DELIVERY_MAX, "التسليم للمستودع")]
+within = lambda s, col, lim: (s[col].dropna() <= lim).mean() * 100 if s[col].notna().any() else float("nan")  # noqa: E731
+pct = lambda v: "—" if pd.isna(v) else f"{v:.1f}%"  # noqa: E731
+for col_ui, (col, lim, name) in zip(st.columns(2), LIMITS):
+    with col_ui:
+        days = "أيام" if lim <= 10 else "يومًا"
+        c.kpi_compare(f"{name} خلال {lim} {days}", within(y25, col, lim), within(y26, col, lim), fmt=pct)
+c.chart("توزيع مدة التسليم للمستودع",
+        f"يبين نسبة الطلبات المسلّمة في كل فئة زمنية؛ الحد المعتمد {dl.DELIVERY_MAX} أيام.",
+        c.delivery_bands(sel, "مدة الأمر حتى التسليم", dl.DELIVERY_MAX))
+late = sel[sel["مدة الأمر حتى التسليم"] > dl.DELIVERY_MAX]
+with st.expander(f"الطلبات التي تجاوز تسليمها {dl.DELIVERY_MAX} أيام ({len(late)} طلبًا)"):
+    st.dataframe(late[["رقم طلب الشراء", "القسم", "وصف الطلب", "المورد", "السنة", "مدة الأمر حتى التسليم",
+                       "مدة الطلب حتى التسليم"]]
+                 .sort_values("مدة الأمر حتى التسليم", ascending=False), hide_index=True, width="stretch")
+
 l, r = st.columns(2)
 with l:
     c.chart("عدد الطلبات شهريًا", "يقارن حجم الطلبات الواردة في كل شهر بين العامين.",
