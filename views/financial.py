@@ -1,3 +1,6 @@
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 import common as c
@@ -22,6 +25,56 @@ with k4:
     c.kpi_official("نسبة الصرف", f"{bal['disbursed'] / bal['approved'] * 100:.1f}%",
                    f"{(tx['الحالة'] == 'صادر').sum()} أمر شراء صادر · {(tx['الحالة'] == 'ملغي').sum()} ملغي")
 st.caption("هذه البطاقات الأربع ثابتة ولا تتأثر بالفلاتر لأنها الأرقام الرسمية للعقد.")
+
+# ------------------------------------------------ وتيرة الصرف من ميزانية العقد والتوقع
+st.subheader("وتيرة الصرف من ميزانية العقد (5 سنوات) والتوقع بنفس الوتيرة")
+months_done, last = c.contract_elapsed()
+end = dl.CONTRACT_START + pd.DateOffset(months=dl.CONTRACT_MONTHS)
+monthly_avg = bal["disbursed"] / months_done
+months_left = bal["remaining"] / monthly_avg if monthly_avg else float("inf")
+depletion = last.to_period("M").to_timestamp() + pd.DateOffset(months=int(np.ceil(months_left)))
+projected_total = monthly_avg * dl.CONTRACT_MONTHS
+c.note(f"العقد من {dl.CONTRACT_START:%m/%Y} إلى {end - pd.DateOffset(days=1):%m/%Y} ({dl.CONTRACT_MONTHS} شهرًا). "
+       f"المنقضي حتى آخر شهر له بيانات ({last:%m/%Y}، وبياناته حتى {last:%d/%m}): {months_done} شهرًا. "
+       "التوقع يفترض استمرار متوسط الصرف الشهري منذ بداية العقد، وهو تقدير للتخطيط وليس رقمًا نهائيًا.")
+k1, k2, k3, k4 = st.columns(4)
+with k1:
+    c.kpi_official("المنقضي من مدة العقد", f"{months_done / dl.CONTRACT_MONTHS * 100:.1f}%",
+                   f"{months_done} شهرًا من {dl.CONTRACT_MONTHS}")
+with k2:
+    c.kpi_official("متوسط الصرف الشهري", c.money(monthly_avg, 0),
+                   f"مقابل {c.money(bal['approved'] / dl.CONTRACT_MONTHS, 0)} لو وُزّعت الميزانية بالتساوي")
+with k3:
+    c.kpi_official("الرصيد يكفي بنفس الوتيرة", f"{months_left:.1f} شهرًا", f"ينفد تقريبًا في {depletion:%m/%Y}")
+with k4:
+    c.kpi_official("المتوقع صرفه حتى نهاية العقد", f"{projected_total / 1e6:.2f} مليون",
+                   f"يتجاوز الميزانية بـ {(projected_total - bal['approved']) / 1e6:.2f} مليون ريال"
+                   if projected_total > bal["approved"] else "ضمن الميزانية")
+
+span = pd.period_range(dl.CONTRACT_START, end - pd.DateOffset(days=1), freq="M")
+actual = (tx.dropna(subset=["التاريخ"]).groupby(tx["التاريخ"].dt.to_period("M"))["المبلغ"].sum()
+          .reindex(pd.period_range(dl.CONTRACT_START, last, freq="M"), fill_value=0).cumsum())
+x_act = actual.index.to_timestamp()
+future = pd.period_range(last.to_period("M"), span[-1], freq="M")
+proj = actual.iloc[-1] + monthly_avg * np.arange(len(future))
+fig = go.Figure()
+fig.add_scatter(x=span.to_timestamp(), y=bal["approved"] / dl.CONTRACT_MONTHS * np.arange(1, len(span) + 1),
+                name="الصرف المتوازن مع مدة العقد", line=dict(color="#9AA8B8", dash="dot"),
+                hovertemplate="%{x|%m/%Y}<br>%{y:,.0f}<extra></extra>")
+fig.add_scatter(x=x_act, y=actual.values, name="المنصرف الفعلي (تراكمي)", line=dict(color=c.YEAR_COLORS[2026], width=3),
+                hovertemplate="%{x|%m/%Y}<br>%{y:,.0f}<extra></extra>")
+fig.add_scatter(x=future.to_timestamp(), y=proj, name="المتوقع بنفس الوتيرة", line=dict(color="#B45309", dash="dash"),
+                hovertemplate="%{x|%m/%Y}<br>%{y:,.0f}<extra></extra>")
+fig.add_hline(y=bal["approved"], line=dict(color="#B91C1C", width=1.5),
+              annotation_text=f"الميزانية المعتمدة {c.money(bal['approved'], 0)}", annotation_position="top left")
+if depletion < end:
+    fig.add_vline(x=depletion, line=dict(color="#B91C1C", dash="dot", width=1))
+    fig.add_annotation(x=depletion, y=bal["approved"], text=f"نفاد الرصيد {depletion:%m/%Y}", showarrow=True,
+                       arrowhead=2, ax=40, ay=-40, font=dict(color="#B91C1C"))
+fig = c._layout(fig, height=440, y_title="المبلغ التراكمي (ريال)")
+fig.update_xaxes(tickformat="%m/%Y", dtick="M6")
+c.chart("المنصرف التراكمي مقابل الميزانية حتى نهاية العقد",
+        "يقارن الصرف الفعلي بالصرف المتوازن مع مدة العقد، ويبين متى ينفد الرصيد إذا استمرت نفس الوتيرة.", fig)
 
 # ------------------------------------------------ المقارنة 2025 مقابل 2026
 months = sorted(f["months"])

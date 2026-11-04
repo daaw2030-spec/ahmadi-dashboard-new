@@ -262,6 +262,13 @@ def chart(title: str, purpose: str, fig: go.Figure):
 
 
 # ---------------------------------------------------------------- الفلاتر العامة
+def contract_elapsed() -> tuple[int, pd.Timestamp]:
+    """عدد الأشهر المنقضية من بداية العقد حتى آخر شهر له بيانات في 2026 (شاملًا ذلك الشهر)."""
+    last = official()["transactions"]["التاريخ"].max()
+    start = dl.CONTRACT_START
+    return (last.year - start.year) * 12 + last.month - start.month + 1, last
+
+
 def comparable_months() -> list[int]:
     """الأشهر التي لها بيانات رسمية في 2026 — تُقارن بنفس الأشهر من 2025."""
     tx = official()["transactions"]
