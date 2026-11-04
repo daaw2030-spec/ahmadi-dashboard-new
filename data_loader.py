@@ -179,6 +179,11 @@ DATE_BASES = {"تاريخ إعداد الطلب": "إعداد الطلب", "تا
 # والدورة كاملة من البلاغ حتى الاستلام في المستودع بحد أقصى 14 يومًا
 DELIVERY_MAX = 7
 CYCLE_MAX = 14
+OVERDUE_DAYS = 60  # الطلب المفتوح الذي تجاوز عمره هذا الحد يحتاج متابعة خاصة
+# بداية العقد غير مذكورة في الملفات: أول طلب شراء بتاريخ 15 يناير 2025، فتُفترض بداية يناير 2025.
+# كمية العقد لكل صنف = كمية السنة × 5
+CONTRACT_START = pd.Timestamp("2025-01-01")
+CONTRACT_MONTHS = 60
 
 
 def load_purchase_orders(src=None) -> pd.DataFrame:
@@ -212,6 +217,31 @@ def load_purchase_orders(src=None) -> pd.DataFrame:
          df["صدور أمر الشراء"].notna()],
         ["ملغي", "تم التسليم", "صدر أمر الشراء"], default="قيد الإجراء")
     return df.reset_index(drop=True)
+
+
+def open_snapshot(df: pd.DataFrame, years) -> tuple[pd.DataFrame, pd.DataFrame, pd.Timestamp]:
+    """وضع الطلبات في نفس اليوم من كل سنة (آخر تاريخ مسجل في الملف) لمقارنة عادلة:
+    الطلبات المُعدّة من 1 يناير حتى ذلك اليوم، والمفتوح منها هو ما لم يُسلَّم للمستودع حتى ذلك اليوم.
+    يعيد (طلبات الفترة، المفتوح منها مع آخر مرحلة وعمره، تاريخ القطع في آخر سنة)."""
+    as_of = df[STAGE_DATES].max().max()
+    period, opened = [], []
+    for y in years:
+        cut = as_of.replace(year=int(y))
+        d = df[(df["إعداد الطلب"] >= pd.Timestamp(int(y), 1, 1)) & (df["إعداد الطلب"] <= cut)
+               & (df["الحالة"] != "ملغي")].copy()
+        d["السنة"], d["تاريخ القطع"] = int(y), cut
+        period.append(d)
+        o = d[d["التسليم للمستودع"].isna() | (d["التسليم للمستودع"] > cut)].copy()
+        dates = o[STAGE_DATES].where(o[STAGE_DATES] <= cut)  # ما حدث بعد يوم القطع لا يُحسب
+        reached = dates.notna()
+        last = reached.iloc[:, ::-1].idxmax(axis=1).where(reached.any(axis=1))
+        o["آخر مرحلة"] = last
+        o["تاريخ آخر مرحلة"] = [dates.at[i, s] if isinstance(s, str) else pd.NaT for i, s in last.items()]
+        o["الحالة عند القطع"] = np.where(dates["صدور أمر الشراء"].notna(), "صدر أمر الشراء", "قيد الإجراء")
+        o["عمر الطلب (يوم)"] = (cut - o["إعداد الطلب"]).dt.days
+        o["أيام في المرحلة الحالية"] = (cut - pd.to_datetime(o["تاريخ آخر مرحلة"])).dt.days
+        opened.append(o)
+    return pd.concat(period), pd.concat(opened), as_of
 
 
 def with_reference_date(df: pd.DataFrame, basis: str) -> pd.DataFrame:

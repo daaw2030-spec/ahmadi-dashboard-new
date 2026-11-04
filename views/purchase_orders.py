@@ -94,6 +94,56 @@ with r:
     c.chart("حالة الطلبات", "يوضح كم طلبًا وصل إلى المستودع وكم ما زال مفتوحًا. الإلغاءات في صفحة الطلبات المباشرة والملغاة.",
             c._layout(fig, y_title="عدد الطلبات", x_title="الحالة"))
 
+# ------------------------------------------------ الطلبات المفتوحة المتأخرة
+st.subheader(f"الطلبات المفتوحة التي تجاوزت {dl.OVERDUE_DAYS} يومًا")
+years = c.active_years()
+period, op, as_of = dl.open_snapshot(po_all, years)
+if f["depts"]:
+    period, op = (d[d["القسم"].isin(f["depts"])] for d in (period, op))
+late_open = op[op["عمر الطلب (يوم)"] > dl.OVERDUE_DAYS].sort_values(["السنة", "عمر الطلب (يوم)"],
+                                                                     ascending=[False, False])
+c.note(f"مقارنة عادلة لنفس الفترة من كل سنة: الطلبات المُعدّة من 1 يناير حتى {as_of:%d/%m} (آخر تاريخ مسجل في "
+       "الملف)، ووضعها في ذلك اليوم من نفس السنة. الطلب المتأخر هو الذي لم يُسلَّم للمستودع حتى ذلك اليوم "
+       f"ومضى على إعداده أكثر من {dl.OVERDUE_DAYS} يومًا. الملغاة مستبعدة، والفترة لا تتأثر بفلتر الأشهر.")
+count = lambda d, y: int((d["السنة"] == y).sum())  # noqa: E731
+k1, k2, k3 = st.columns(3)
+with k1:
+    c.kpi_compare("عدد الطلبات المتأخرة", count(late_open, 2025), count(late_open, 2026), fmt=c.num)
+with k2:
+    share = lambda y: count(late_open, y) / count(period, y) * 100 if count(period, y) else 0  # noqa: E731
+    c.kpi_compare("نسبتها من طلبات الفترة", share(2025), share(2026), fmt=lambda v: f"{v:.1f}%",
+                  show_change=False)
+with k3:
+    issued = late_open[late_open["الحالة عند القطع"] == "صدر أمر الشراء"]
+    c.kpi_compare("منها صدر أمرها وتنتظر التسليم", count(issued, 2025), count(issued, 2026), fmt=c.num)
+
+stages = [s for s in dl.STAGE_DATES if s in set(late_open["آخر مرحلة"])]
+fig = go.Figure()
+for y in years:
+    g = late_open[late_open["السنة"] == y]["آخر مرحلة"].value_counts().reindex(stages, fill_value=0)
+    fig.add_bar(name=str(y), y=stages, x=g.values, orientation="h", text=g.values, textposition="outside",
+                marker=dict(color=c.YEAR_COLORS[y], cornerradius=4),
+                hovertemplate=f"%{{y}} {y}<br>%{{x}} طلبًا<extra></extra>")
+fig = c._layout(fig, height=max(280, 90 + 56 * len(stages)), x_title="عدد الطلبات")
+fig.update_yaxes(autorange="reversed", showgrid=False, title="", ticksuffix="   ")
+c.chart("آخر مرحلة وصلتها الطلبات المتأخرة",
+        "يبين أين تتوقف الطلبات: «صدور أمر الشراء» يعني أن الأمر صدر والطلب ينتظر التسليم للمستودع.", fig)
+
+counts = late_open["آخر مرحلة"].value_counts()
+chosen = st.pills("عرض طلبات مرحلة معينة", [f"{s} ({counts[s]})" for s in stages], selection_mode="multi",
+                  key="late_stage_pick")
+chosen = [p.rsplit(" (", 1)[0] for p in chosen]
+shown = late_open[late_open["آخر مرحلة"].isin(chosen)] if chosen else late_open
+st.caption(f"المعروض: {len(shown)} طلبًا" + (f" — المرحلة: {'، '.join(chosen)}" if chosen else " — كل المراحل")
+           + ". «الحالة الآن» هي وضع الطلب في آخر تحديث للملف.")
+st.dataframe(
+    shown[["السنة", "رقم طلب الشراء", "القسم", "وصف الطلب", "الموقع", "المورد", "آخر مرحلة", "تاريخ آخر مرحلة",
+           "عمر الطلب (يوم)", "أيام في المرحلة الحالية", "الحالة"]]
+    .rename(columns={"الحالة": "الحالة الآن"}).fillna({"وصف الطلب": "—", "الموقع": "—", "المورد": "—"}),
+    hide_index=True, width="stretch",
+    column_config={"السنة": st.column_config.NumberColumn(format="%d"),
+                   "تاريخ آخر مرحلة": st.column_config.DateColumn(format="YYYY-MM-DD")})
+
 with st.expander("جودة البيانات: المدد المستبعدة من المؤشرات الزمنية"):
     q = pd.DataFrame({
         "المرحلة": dl.STAGE_DURATIONS,
