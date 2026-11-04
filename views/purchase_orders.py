@@ -102,20 +102,26 @@ if f["depts"]:
     period, op = (d[d["القسم"].isin(f["depts"])] for d in (period, op))
 late_open = op[op["عمر الطلب (يوم)"] > dl.OVERDUE_DAYS].sort_values(["السنة", "عمر الطلب (يوم)"],
                                                                      ascending=[False, False])
-c.note(f"مقارنة عادلة لنفس الفترة من كل سنة: الطلبات المُعدّة من 1 يناير حتى {as_of:%d/%m} (آخر تاريخ مسجل في "
-       "الملف)، ووضعها في ذلك اليوم من نفس السنة. الطلب المتأخر هو الذي لم يُسلَّم للمستودع حتى ذلك اليوم "
-       f"ومضى على إعداده أكثر من {dl.OVERDUE_DAYS} يومًا. الملغاة مستبعدة، والفترة لا تتأثر بفلتر الأشهر.")
+c.note(f"2025: كل طلبات السنة ووضعها في 31/12/2025. 2026: الطلبات من 1 يناير حتى {as_of:%d/%m/%Y} (آخر تاريخ "
+       "مسجل في الملف) ووضعها في ذلك اليوم. الطلب المتأخر هو الذي لم يُسلَّم للمستودع حتى يوم القطع ومضى على "
+       f"إعداده أكثر من {dl.OVERDUE_DAYS} يومًا. الملغاة مستبعدة، والفترة لا تتأثر بفلتر الأشهر.")
 count = lambda d, y: int((d["السنة"] == y).sum())  # noqa: E731
-k1, k2, k3 = st.columns(3)
+issued = late_open[late_open["الحالة عند القطع"] == "صدر أمر الشراء"]
+pending = late_open[late_open["الحالة عند القطع"] == "قيد الإجراء"]
+k1, k2, k3, k4 = st.columns(4)
 with k1:
-    c.kpi_compare("عدد الطلبات المتأخرة", count(late_open, 2025), count(late_open, 2026), fmt=c.num)
+    c.kpi_compare("إجمالي الطلبات المتأخرة", count(late_open, 2025), count(late_open, 2026), fmt=c.num,
+                  show_change=False)
 with k2:
-    share = lambda y: count(late_open, y) / count(period, y) * 100 if count(period, y) else 0  # noqa: E731
-    c.kpi_compare("نسبتها من طلبات الفترة", share(2025), share(2026), fmt=lambda v: f"{v:.1f}%",
+    c.kpi_compare("منها: صدر أمرها وتنتظر التسليم", count(issued, 2025), count(issued, 2026), fmt=c.num,
                   show_change=False)
 with k3:
-    issued = late_open[late_open["الحالة عند القطع"] == "صدر أمر الشراء"]
-    c.kpi_compare("منها صدر أمرها وتنتظر التسليم", count(issued, 2025), count(issued, 2026), fmt=c.num)
+    c.kpi_compare("منها: ما زالت قيد الإجراء", count(pending, 2025), count(pending, 2026), fmt=c.num,
+                  show_change=False)
+with k4:
+    share = lambda y: count(late_open, y) / count(period, y) * 100 if count(period, y) else 0  # noqa: E731
+    c.kpi_compare("نسبة المتأخرة من طلبات السنة", share(2025), share(2026), fmt=lambda v: f"{v:.1f}%",
+                  show_change=False)
 
 stages = [s for s in dl.STAGE_DATES if s in set(late_open["آخر مرحلة"])]
 fig = go.Figure()
