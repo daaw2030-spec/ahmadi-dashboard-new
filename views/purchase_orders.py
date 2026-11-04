@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -128,6 +129,19 @@ with k4:
     c.kpi_compare("نسبة المتأخرة من طلبات السنة", share(2025), share(2026), fmt=lambda v: f"{v:.1f}%",
                   show_change=False)
 
+late_open = late_open.assign(**{"يحتاج متابعة": np.where(late_open["الحالة"] == "تم التسليم", "لا — سُلّم لاحقًا",
+                                                           "نعم")})
+summary = pd.DataFrame([{
+    "الفترة": "2025 كاملة (حتى 31/12/2025)" if y < as_of.year else f"{y} حتى {as_of:%d/%m/%Y}",
+    "تجاوزت 60 يومًا": count(late_open, y), "منها صدر أمرها": count(issued, y),
+    "منها قيد الإجراء": count(pending, y),
+    "سُلّمت لاحقًا": count(late_open[late_open["الحالة"] == "تم التسليم"], y),
+    "ما زالت مفتوحة الآن": count(late_open[late_open["يحتاج متابعة"] == "نعم"], y)} for y in years])
+st.markdown("**ملخص الطلبات المتأخرة ووضعها الآن**")
+st.caption(f"«سُلّمت لاحقًا» و«ما زالت مفتوحة الآن» حسب آخر تحديث للملف ({as_of:%d/%m/%Y}). "
+           f"إجمالي ما يحتاج متابعة الآن: {int((late_open['يحتاج متابعة'] == 'نعم').sum())} طلبًا.")
+st.dataframe(summary, hide_index=True, width="stretch")
+
 stages = [s for s in dl.STAGE_DATES if s in set(late_open["آخر مرحلة"])]
 fig = go.Figure()
 for y in years:
@@ -144,13 +158,18 @@ counts = late_open["آخر مرحلة"].value_counts()
 chosen = st.pills("عرض طلبات مرحلة معينة", [f"{s} ({counts[s]})" for s in stages], selection_mode="multi",
                   key="late_stage_pick")
 chosen = [p.rsplit(" (", 1)[0] for p in chosen]
+only_open = st.toggle("عرض الطلبات التي تحتاج متابعة الآن فقط", value=True, key="late_only_open")
 shown = late_open[late_open["آخر مرحلة"].isin(chosen)] if chosen else late_open
+if only_open:
+    shown = shown[shown["يحتاج متابعة"] == "نعم"]
 st.caption(f"المعروض: {len(shown)} طلبًا" + (f" — المرحلة: {'، '.join(chosen)}" if chosen else " — كل المراحل")
-           + ". «الحالة الآن» هي وضع الطلب في آخر تحديث للملف.")
+           + ". «آخر مرحلة» عند نهاية الفترة، و«الحالة الآن» وضع الطلب في آخر تحديث للملف.")
 st.dataframe(
     shown[["السنة", "رقم طلب الشراء", "القسم", "وصف الطلب", "الموقع", "المورد", "آخر مرحلة", "تاريخ آخر مرحلة",
-           "عمر الطلب (يوم)", "أيام في المرحلة الحالية", "الحالة"]]
-    .rename(columns={"الحالة": "الحالة الآن"}).fillna({"وصف الطلب": "—", "الموقع": "—", "المورد": "—"}),
+           "عمر الطلب (يوم)", "أيام في المرحلة الحالية", "الحالة", "يحتاج متابعة"]]
+    .rename(columns={"الحالة": "الحالة الآن", "وصف الطلب": "اسم الطلب"})
+    .replace({"الحالة الآن": {"صدر أمر الشراء": "صدر أمر الشراء — ينتظر التسليم من المقاول"}})
+    .fillna({"اسم الطلب": "غير مذكور في الملف", "الموقع": "—", "المورد": "—"}),
     hide_index=True, width="stretch",
     column_config={"السنة": st.column_config.NumberColumn(format="%d"),
                    "تاريخ آخر مرحلة": st.column_config.DateColumn(format="YYYY-MM-DD")})
