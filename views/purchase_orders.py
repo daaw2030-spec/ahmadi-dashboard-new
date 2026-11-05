@@ -110,36 +110,39 @@ c.note("<b>معنى الحالات:</b> «متأخر» = مضى على إعدا�
        "«صدر أمرها وتنتظر التسليم» = أصدرت المشتريات أمر الشراء، والطلب ينتظر أن يورّده المقاول للمستودع "
        f"(الحد المعتمد من استلام المقاول للأمر حتى التسليم {dl.DELIVERY_MAX} أيام). «قيد الإجراء» = لم يصدر "
        "أمر الشراء بعد، والطلب ما زال في الإجراءات الداخلية (استلام الطلب، عروض الأسعار، المحضر، الإرسال للمشتريات). "
-       "«الحالة الآن» في الجدول = وضع الطلب في آخر تحديث للملف، فبعض طلبات 2025 سُلّمت لاحقًا.")
+       "الأرقام أدناه حسب وضع الطلب الآن (آخر تحديث للملف)، فبعض طلبات 2025 سُلّمت لاحقًا وأُغلقت.")
 count = lambda d, y: int((d["السنة"] == y).sum())  # noqa: E731
-issued = late_open[late_open["الحالة عند القطع"] == "صدر أمر الشراء"]
-pending = late_open[late_open["الحالة عند القطع"] == "قيد الإجراء"]
+# الأجزاء الثلاثة حسب وضع الطلب الآن، ومجموعها = إجمالي المتأخرة
+delivered = late_open[late_open["الحالة"] == "تم التسليم"]
+issued = late_open[late_open["الحالة"] == "صدر أمر الشراء"]
+pending = late_open[late_open["الحالة"] == "قيد الإجراء"]
 k1, k2, k3, k4 = st.columns(4)
 with k1:
-    c.kpi_compare("إجمالي الطلبات المتأخرة", count(late_open, 2025), count(late_open, 2026), fmt=c.num,
-                  show_change=False)
+    c.kpi_compare("تجاوزت 60 يومًا دون تسليم (الإجمالي)", count(late_open, 2025), count(late_open, 2026),
+                  fmt=c.num, show_change=False)
 with k2:
-    c.kpi_compare("منها: صدر أمر الشراء وينتظر تسليم المقاول", count(issued, 2025), count(issued, 2026), fmt=c.num,
-                  show_change=False)
+    c.kpi_compare("منها الآن: تم تسليمها لاحقًا (أُغلقت)", count(delivered, 2025), count(delivered, 2026),
+                  fmt=c.num, show_change=False)
 with k3:
-    c.kpi_compare("منها: قيد الإجراء (لم يصدر أمر الشراء)", count(pending, 2025), count(pending, 2026), fmt=c.num,
+    c.kpi_compare("منها الآن: صدر أمر الشراء وتنتظر المقاول", count(issued, 2025), count(issued, 2026), fmt=c.num,
                   show_change=False)
 with k4:
-    share = lambda y: count(late_open, y) / count(period, y) * 100 if count(period, y) else 0  # noqa: E731
-    c.kpi_compare("نسبة المتأخرة من طلبات السنة", share(2025), share(2026), fmt=lambda v: f"{v:.1f}%",
-                  show_change=False)
+    c.kpi_compare("منها الآن: قيد الإجراء (لم يصدر أمر الشراء)", count(pending, 2025), count(pending, 2026),
+                  fmt=c.num, show_change=False)
 
 late_open = late_open.assign(**{"يحتاج متابعة": np.where(late_open["الحالة"] == "تم التسليم", "لا — سُلّم لاحقًا",
                                                            "نعم")})
 summary = pd.DataFrame([{
     "الفترة": "2025 كاملة (حتى 31/12/2025)" if y < as_of.year else f"{y} حتى {as_of:%d/%m/%Y}",
-    "تجاوزت 60 يومًا": count(late_open, y), "صدر أمر الشراء وينتظر تسليم المقاول": count(issued, y),
-    "قيد الإجراء (لم يصدر أمر الشراء)": count(pending, y),
-    "سُلّمت لاحقًا": count(late_open[late_open["الحالة"] == "تم التسليم"], y),
-    "لم تُسلَّم للمستودع حتى الآن": count(late_open[late_open["يحتاج متابعة"] == "نعم"], y)} for y in years])
+    "تجاوزت 60 يومًا": count(late_open, y), "تم تسليمها لاحقًا (أُغلقت)": count(delivered, y),
+    "صدر أمر الشراء وتنتظر المقاول": count(issued, y), "قيد الإجراء (لم يصدر أمر الشراء)": count(pending, y),
+    "تحتاج متابعة الآن": count(issued, y) + count(pending, y),
+    "نسبتها من طلبات السنة": f"{count(late_open, y) / count(period, y) * 100:.1f}%" if count(period, y) else "—"}
+    for y in years])
 st.markdown("**ملخص الطلبات المتأخرة ووضعها الآن**")
-st.caption(f"«سُلّمت لاحقًا» و«لم تُسلَّم للمستودع حتى الآن» حسب آخر تحديث للملف ({as_of:%d/%m/%Y}). "
-           f"إجمالي ما يحتاج متابعة الآن: {int((late_open['يحتاج متابعة'] == 'نعم').sum())} طلبًا.")
+st.caption(f"الوضع حسب آخر تحديث للملف ({as_of:%d/%m/%Y}): «تجاوزت 60 يومًا» = تم تسليمها لاحقًا + صدر أمر الشراء "
+           "+ قيد الإجراء. والطلبات التي تحتاج متابعة هي غير المسلّمة فقط: "
+           f"{int((late_open['يحتاج متابعة'] == 'نعم').sum())} طلبًا.")
 st.dataframe(summary, hide_index=True, width="stretch")
 
 stages = [s for s in dl.STAGE_DATES if s in set(late_open["آخر مرحلة"])]
