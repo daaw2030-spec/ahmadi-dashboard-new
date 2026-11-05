@@ -136,9 +136,9 @@ summary = pd.DataFrame([{
     "تجاوزت 60 يومًا": count(late_open, y), "صدر أمر الشراء وينتظر تسليم المقاول": count(issued, y),
     "قيد الإجراء (لم يصدر أمر الشراء)": count(pending, y),
     "سُلّمت لاحقًا": count(late_open[late_open["الحالة"] == "تم التسليم"], y),
-    "ما زالت مفتوحة الآن": count(late_open[late_open["يحتاج متابعة"] == "نعم"], y)} for y in years])
+    "لم تُسلَّم للمستودع حتى الآن": count(late_open[late_open["يحتاج متابعة"] == "نعم"], y)} for y in years])
 st.markdown("**ملخص الطلبات المتأخرة ووضعها الآن**")
-st.caption(f"«سُلّمت لاحقًا» و«ما زالت مفتوحة الآن» حسب آخر تحديث للملف ({as_of:%d/%m/%Y}). "
+st.caption(f"«سُلّمت لاحقًا» و«لم تُسلَّم للمستودع حتى الآن» حسب آخر تحديث للملف ({as_of:%d/%m/%Y}). "
            f"إجمالي ما يحتاج متابعة الآن: {int((late_open['يحتاج متابعة'] == 'نعم').sum())} طلبًا.")
 st.dataframe(summary, hide_index=True, width="stretch")
 
