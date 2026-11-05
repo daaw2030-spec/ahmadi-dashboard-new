@@ -119,10 +119,10 @@ with k1:
     c.kpi_compare("إجمالي الطلبات المتأخرة", count(late_open, 2025), count(late_open, 2026), fmt=c.num,
                   show_change=False)
 with k2:
-    c.kpi_compare("منها: صدر أمرها وتنتظر التسليم", count(issued, 2025), count(issued, 2026), fmt=c.num,
+    c.kpi_compare("منها: صدر أمر الشراء وينتظر تسليم المقاول", count(issued, 2025), count(issued, 2026), fmt=c.num,
                   show_change=False)
 with k3:
-    c.kpi_compare("منها: ما زالت قيد الإجراء", count(pending, 2025), count(pending, 2026), fmt=c.num,
+    c.kpi_compare("منها: قيد الإجراء (لم يصدر أمر الشراء)", count(pending, 2025), count(pending, 2026), fmt=c.num,
                   show_change=False)
 with k4:
     share = lambda y: count(late_open, y) / count(period, y) * 100 if count(period, y) else 0  # noqa: E731
@@ -133,8 +133,8 @@ late_open = late_open.assign(**{"يحتاج متابعة": np.where(late_open["�
                                                            "نعم")})
 summary = pd.DataFrame([{
     "الفترة": "2025 كاملة (حتى 31/12/2025)" if y < as_of.year else f"{y} حتى {as_of:%d/%m/%Y}",
-    "تجاوزت 60 يومًا": count(late_open, y), "منها صدر أمرها": count(issued, y),
-    "منها قيد الإجراء": count(pending, y),
+    "تجاوزت 60 يومًا": count(late_open, y), "صدر أمر الشراء وينتظر تسليم المقاول": count(issued, y),
+    "قيد الإجراء (لم يصدر أمر الشراء)": count(pending, y),
     "سُلّمت لاحقًا": count(late_open[late_open["الحالة"] == "تم التسليم"], y),
     "ما زالت مفتوحة الآن": count(late_open[late_open["يحتاج متابعة"] == "نعم"], y)} for y in years])
 st.markdown("**ملخص الطلبات المتأخرة ووضعها الآن**")
